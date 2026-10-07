@@ -2,3 +2,5 @@
 A tool for reading email templates used in Japanese feature phones.
 
 It is currently compatible with NTT DoCoMo decome templates saved in a .dmt file format.
+
+[Click here for the Keitai Mail Viewer](https://unabandonware.github.io/keitai-mail-viewer/).
