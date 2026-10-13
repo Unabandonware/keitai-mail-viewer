@@ -1,20 +1,20 @@
-//Constant for file uploader
-const input = document.getElementById('file-input');
-//Constant for the drop zone
-const dropZone = document.getElementById('drop-zone');
-//Constant for the .dmt viewer
+//---PAGE SETUP
+//The email will be viewed within an iframe since it is essentially its own HTML page
+//TO-DO: Add the ability to resize the viewer to reflect different phone sizes (240x360, 480x852, etc.)
 const viewer = document.getElementById('viewer');
-//Pick a file through the dialog
+
+//Drag and drop file viewer code was sourced from MDN's HTML Drag and Drop API
+const input = document.getElementById('file-input');
+const dropZone = document.getElementById('drop-zone');
 input.addEventListener('change', () => showFile(input.files[0]));
-//Without this, the browser won't let a drop happen
 dropZone.addEventListener('dragover', (e) => e.preventDefault());
-//Drop a file onto the drop zone
 dropZone.addEventListener('drop', (e) => {
-    e.preventDefault(); //stop the browser from opening the file itself
+    e.preventDefault();
     showFile(e.dataTransfer.files[0]);
 });
 
-//Function for reading .swf file sizes
+//---FLASH MANAGEMENT
+//Function for reading .swf file sizes. This is needed because 
 function swfSize(base64) {
   const bytes = Uint8Array.from(atob(base64.slice(0, 100)), c => c.charCodeAt(0)).slice(8);
   const bits = [...bytes.slice(0, 20)].map(b => b.toString(2).padStart(8, '0')).join('');
@@ -23,10 +23,46 @@ function swfSize(base64) {
   return { width: num(1) - num(0), height: num(3) - num(2) };
 }
 
+//---EMOJI MANAGEMENT
+//Pixels at least this opaque (0-255) become solid and the rest become empty, so pictograms have hard edges like the simulator's
+const PICT_ALPHA_CUTOFF = 100;
+
+//Load a pictogram PNG as a data URI with hard edges. The viewer iframe is sandboxed, so it can't fetch the PNG for a CSS mask itself
+const pictCache = {};
+async function pictData(code) {
+  if (!pictCache[code]) {
+    const res = await fetch(`pictograms/i-mode Simulator/${code}.png`);
+    if (!res.ok) throw new Error('missing ' + code);
+    const bitmap = await createImageBitmap(await res.blob());
+    const canvas = document.createElement('canvas');
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(bitmap, 0, 0);
+    const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    for (let i = 3; i < img.data.length; i += 4) img.data[i] = img.data[i] >= PICT_ALPHA_CUTOFF ? 255 : 0;
+    ctx.putImageData(img, 0, 0);
+    pictCache[code] = canvas.toDataURL('image/png');
+  }
+  return pictCache[code];
+}
+
+//This function will recolor the emoji based on the surrounding font color. 
+function pictFontColor(node) {
+  for (let el = node.parentElement; el; el = el.parentElement) {
+    let c = (el.tagName === 'FONT' && el.getAttribute('color')) || el.style.color || (el.tagName === 'BODY' && el.getAttribute('text')) || '';
+    c = c.trim();
+    if (/^[0-9a-f]{6}$/i.test(c)) c = '#' + c; //old HTML allowed colors without the #
+    if (c && CSS.supports('color', c)) return c;
+  }
+  return null;
+}
+
+//---MAIN
 //Read a .dmt file and show it in the viewer
 async function showFile(file) {
     const buffer = await file.arrayBuffer();
-    //Try UTF-8 first (some files read better as UTF-8 instead of Shift_JIS), otherwise Shift_JIS
+    //Try UTF-8 first (some files read better as UTF-8 instead of Shift_JIS despite being labelled as Shift_JIS), otherwise Shift_JIS
     let text;
     try {
         text = new TextDecoder('utf-8', { fatal: true }).decode(buffer);
@@ -34,11 +70,11 @@ async function showFile(file) {
         text = new TextDecoder('shift_jis').decode(buffer);
     }
 
-    //Cut the file into its parts
+    //The boundaries of the Deco-mail are pre-defined by text like boundary="3000000000". The boundaries separate different types of media: HTML, images, flash.
     const boundaries = [...text.matchAll(/boundary="([^"]+)"/g)].map(m => m[1]);
     const chunks = text.split(new RegExp('--(?:' + boundaries.join('|') + ')'));
 
-    //Establish body of email
+    //Trim the HTML chunks and put them into the iframe
     let html = '';
 
     for (const chunk of chunks) {
@@ -63,7 +99,7 @@ async function showFile(file) {
             .replace(/\s+/g, '');
 
         if (mime === 'application/x-shockwave-flash') {
-          //Flash: read the size from the SWF header, then inject the data
+          //Flash: Using the function defined earlier, read the size from the SWF header, then inject the data
           const { width, height } = swfSize(data);
           html = html.replace(
             new RegExp('<object([^>]*?)data="cid:' + cid + '"', 'i'),
@@ -77,7 +113,7 @@ async function showFile(file) {
     }
 
 
-    //Flash-only mail (no HTML part): show the Flash directly
+    //Some of the Deco-mail "templates" recovered from phones are actually introduction emails that come pre-installed on the device. Thus, they don't have editable template text, and they do not contain a HTML portion. 
     if (!html) {
       for (const chunk of chunks) {
         if (/^Content-Type:\s*application\/x-shockwave-flash/i.test(chunk.trim())) {
@@ -92,11 +128,34 @@ async function showFile(file) {
       }
     }
 
-    //Replace pictogram characters with images
-    html = html.replace(/[\uE63E-\uE757]/g, ch => {
-      const code = ch.codePointAt(0).toString(16);
-      return `<img class="pict" src="pictograms/${code}.png" alt="">`;
-    });
+  //Replace pictogram characters with colored masks. 
+  //The color is the surrounding font color if there is one, otherwise the pictogram's default color comes from the table in pictograms.js (colors are sourced from NTT DoCoMo's i-mode creation documents).
+  if (/[\uE63E-\uE757]/.test(html)) {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
+    const textNodes = [];
+    while (walker.nextNode()) textNodes.push(walker.currentNode);
+
+    for (const node of textNodes) {
+      const parts = node.nodeValue.split(/([\uE63E-\uE757])/); //odd entries are pictograms
+      if (parts.length === 1) continue;
+      const color = pictFontColor(node);
+      for (let i = 1; i < parts.length; i += 2) {
+        const code = parts[i].codePointAt(0).toString(16);
+        try {
+          const url = `url('${await pictData(code)}')`;
+          const span = doc.createElement('span');
+          span.className = 'pict';
+          span.setAttribute('style', `background-color:${color || pictColor(code)};-webkit-mask-image:${url};mask-image:${url}`);
+          parts[i] = span;
+        } catch {
+          parts[i] = ''; //no PNG for this code
+        }
+      }
+      node.replaceWith(...parts);
+    }
+    html = doc.documentElement.outerHTML;
+  }
 
     //Remove modern webpage styling that will mess with the formatting
     //Also adds text stylings
@@ -116,7 +175,10 @@ async function showFile(file) {
         @keyframes blink { 50% { visibility: hidden; } }
 
         /* pictograms */
-        img.pict { width: 1em; height: 1em; vertical-align: middle; }
+        span.pict { display: inline-block; width: 1em; height: 1em; vertical-align: middle;
+          -webkit-mask-size: 100% 100%; mask-size: 100% 100%;
+          -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+          image-rendering: pixelated; }
 
         </style>` + html;
 
