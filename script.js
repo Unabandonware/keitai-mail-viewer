@@ -65,6 +65,35 @@ function pictFontColor(node) {
 }
 
 //---SOUND MANAGEMENT
+
+//Some sound names are MIME encoded-words like =?Shift_JIS?B?...?=, so they need to be decoded
+function decodeMimeWords(str) {
+  str = str.replace(/(\?=)\s+(?==\?)/g, '$1');
+  return str.replace(/=\?([^?]+)\?([bBqQ])\?([^?]*)\?=/g, (_, charset, enc, text) => {
+    let bytes;
+    if (enc.toUpperCase() === 'B') {
+      bytes = Uint8Array.from(atob(text), c => c.charCodeAt(0));
+    } else {   //Q-encoding: "_" is a space, "=XX" is a hex byte
+      const q = text.replace(/_/g, ' ');
+      const out = [];
+      for (let i = 0; i < q.length; i++) {
+        if (q[i] === '=' && /^[0-9A-Fa-f]{2}$/.test(q.substr(i + 1, 2))) {
+          out.push(parseInt(q.substr(i + 1, 2), 16));
+          i += 2;
+        } else {
+          out.push(q.charCodeAt(i));
+        }
+      }
+      bytes = Uint8Array.from(out);
+    }
+    try {
+      return new TextDecoder(charset.toLowerCase()).decode(bytes);
+    } catch {
+      return new TextDecoder('shift_jis').decode(bytes);   //unknown charset label
+    }
+  });
+}
+
 //SMAF (.mmf) sounds can't play in a browser, so they're pulled out of the email and offered as downloads on the main page
 function extractSounds(chunks) {
   const sounds = [];
@@ -73,7 +102,7 @@ function extractSounds(chunks) {
     const m = chunk.trim().match(/^([\s\S]*?)\r?\n\r?\n([\s\S]*)$/);   // headers | body
     if (!m) continue;
     const nm = m[1].match(/name\s*=\s*"?([^";\r\n]+)"?/i);
-    let name = (nm ? nm[1] : 'sound' + (sounds.length + 1))
+    let name = decodeMimeWords(nm ? nm[1] : 'sound' + (sounds.length + 1))
       .replace(/[\\/:*?"<>|\x00-\x1f]/g, '_').trim();
     if (!/\.(mmf|smaf)$/i.test(name)) name += '.mmf';
     sounds.push({ name, data: m[2].replace(/\s+/g, '') });
