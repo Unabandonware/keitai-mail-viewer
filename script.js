@@ -58,8 +58,50 @@ function pictFontColor(node) {
   return null;
 }
 
+//---SOUND MANAGEMENT
+//SMAF (.mmf) sounds can't play in a browser, so they're pulled out of the email and offered as downloads on the main page
+function extractSounds(chunks) {
+  const sounds = [];
+  for (const chunk of chunks) {
+    if (!/^Content-Type:\s*application\/(x-smaf|vnd\.smaf)/i.test(chunk.trim())) continue;
+    const m = chunk.trim().match(/^([\s\S]*?)\r?\n\r?\n([\s\S]*)$/);   // headers | body
+    if (!m) continue;
+    const nm = m[1].match(/name\s*=\s*"?([^";\r\n]+)"?/i);
+    let name = (nm ? nm[1] : 'sound' + (sounds.length + 1))
+      .replace(/[\\/:*?"<>|\x00-\x1f]/g, '_').trim();
+    if (!/\.(mmf|smaf)$/i.test(name)) name += '.mmf';
+    sounds.push({ name, data: m[2].replace(/\s+/g, '') });
+  }
+  return sounds;
+}
+
+let soundUrls = [];
+function showSounds(sounds) {
+  const box = document.getElementById('sound-downloads');
+  soundUrls.forEach(u => URL.revokeObjectURL(u));   // clean up the last email's links
+  soundUrls = [];
+  box.replaceChildren();
+  box.hidden = true;
+  for (const s of sounds) {
+    try {
+      const bytes = Uint8Array.from(atob(s.data), c => c.charCodeAt(0));
+      const url = URL.createObjectURL(new Blob([bytes], { type: 'application/x-smaf' }));
+      soundUrls.push(url);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = s.name;
+      a.textContent = `♪ Download sound (${s.name})`;
+      box.appendChild(a);
+      box.appendChild(document.createElement('br'));
+      box.hidden = false;
+    } catch (e) {
+      console.error('Bad sound data in', s.name, e);   // never break the whole email over a sound
+    }
+  }
+}
+
 //---MAIN
-//Read a .dmt file and show it in the viewer
+//Read a file and show it in the viewer
 async function showFile(file) {
     const buffer = await file.arrayBuffer();
     //Try UTF-8 first (some files read better as UTF-8 instead of Shift_JIS despite being labelled as Shift_JIS), otherwise Shift_JIS
@@ -85,7 +127,7 @@ async function showFile(file) {
       }
     }
 
-    //Reduce media chunks to just ID and Base64 content, then inject into the email body
+    //Reduce media chunks to just ID and Base64 content, then inject into the email body (or, for smaf, puts it into a download area)
     for (const chunk of chunks) {
       if (/^Content-Type:\s*(image\/|application\/x-shockwave-flash)/i.test(chunk.trim())) {
         const mime = chunk.match(/Content-Type:\s*([\w\/.+-]+)/i)[1];
@@ -97,7 +139,7 @@ async function showFile(file) {
             .replace(/Content-Transfer-Encoding:[^\r\n]*/i, '')
             .replace(/Content-ID:[^\r\n]*/i, '')
             .replace(/\s+/g, '');
-
+        // Flash animations (all types)
         if (mime === 'application/x-shockwave-flash') {
           //Flash: Using the function defined earlier, read the size from the SWF header, then inject the data
           const { width, height } = swfSize(data);
@@ -105,7 +147,7 @@ async function showFile(file) {
             new RegExp('<object([^>]*?)data="cid:' + cid + '"', 'i'),
             `<object$1 width="${width}" height="${height}" data="data:${mime};base64,${data}"`
           );
-          //Else = images
+        // Image files (all types)
         } else {
           html = html.replaceAll('cid:' + cid + '"', 'data:' + mime + ';base64,' + data + '"');
         }
@@ -188,6 +230,10 @@ async function showFile(file) {
     //Add Ruffle integration
     html = `<script>window.RufflePlayer={config:{autoplay:"on",unmuteOverlay:"hidden",letterbox:"off"}};<\/script>
 <script src="https://unpkg.com/@ruffle-rs/ruffle"><\/script>` + html;
+
+    //Sounds: strip <bgsound> (its cid: can't load), then offer the files for download
+    html = html.replace(/<bgsound[^>]*>/gi, '');
+    showSounds(extractSounds(chunks));
 
     //View email template
     viewer.srcdoc = html;

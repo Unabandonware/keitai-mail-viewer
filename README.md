@@ -12,12 +12,15 @@ The Deco-mail viewer in this Javascript application is based on NTT DoCoMo's
 i-mode HTML Simulator II application.
 
 # About Decome-Anime (not yet implemented)
-Decome Anime (デコメアニメ) is a type of Deco-mail template that uses Flash to create interactive emails with customized messages. 
+Decome Anime (デコメアニメ) is a type of Deco-mail template that uses Flash to create interactive emails with customized messages.
+
+# Decore Mail
+Basically the same thing as Deco-mail, but for SoftBank phones using Yahoo!Keitai.
 
 # To-Do
 - Integrate Decome-Anime emails using .vgt file format
 - Add more pictogram sets
-- Long Term: Add compatibility with **Decoration Mail** (EZweb) and **Decore Mail** (SoftBank)
+- Long Term: Add compatibility with **Decoration Mail** (EZweb) and **Decore Mail** (SoftBank) [started]
 
 # Note on pictograms/emojis
 DOCOMO pictograms © NTT DOCOMO, INC. Used for non-commercial preservation purposes. Not affiliated with or endorsed by NTT DOCOMO.
