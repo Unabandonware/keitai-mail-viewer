@@ -46,9 +46,19 @@ body {
   object-fit: cover;
 }
 
+#rotation {
+  width: fit-content;
+}
+
 #viewer {
   width: 240px;
   height: 320px;
   border: 1px solid #888;
   background: #fff;
+  transition: width 0.2s, height 0.2s;
+}
+
+#viewer.landscape {
+  width: 320px;
+  height: 240px;
 }

@@ -3,6 +3,12 @@
 //TO-DO: Add the ability to resize the viewer to reflect different phone sizes (240x360, 480x852, etc.)
 const viewer = document.getElementById('viewer');
 
+document.querySelectorAll('input[name="orientation"]').forEach(radio => {
+    radio.addEventListener('change', () => {
+        viewer.classList.toggle('landscape', radio.value === 'landscape');
+    });
+});
+
 //Drag and drop file viewer code was sourced from MDN's HTML Drag and Drop API
 const input = document.getElementById('file-input');
 const dropZone = document.getElementById('drop-zone');
